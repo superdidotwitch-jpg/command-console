@@ -435,7 +435,7 @@ table.xpt td:last-child{color:var(--amber)}
   try{muted=localStorage.getItem("console-muted")==="1"}catch(e){}
   function audio(){
     if(muted)return null;
-    if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=.5;master.connect(AC.destination)}catch(e){return null}}
+    if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)();master=AC.createGain();master.gain.value=.42;master.connect(AC.destination)}catch(e){return null}}
     if(AC.state==="suspended"){try{AC.resume()}catch(e){}}
     return AC;
   }
@@ -495,29 +495,106 @@ table.xpt td:last-child{color:var(--amber)}
   function servo(on){sweep("sawtooth",on?180:420,on?420:180,0,.22,.1,1200,2400);noise(0,.22,.05,"bandpass",2000,3000,3);clunk(.22);if(on)droid(.3,3,1)}
   /* briefing chime: starting the quiz */
   function chime(){tone(784,0,.16,"sine",.16);tone(988,.16,.16,"sine",.16);tone(1175,.32,.16,"sine",.16);tone(1568,.48,.5,"sine",.16);sweep("sine",200,800,.48,.5,.06,5000,5000)}
-  /* a ship passing the window: a distinct swoosh per hull design (0-3), always the same design -> same sound, and sounds from several ships can overlay freely since each is its own set of nodes. A bit louder/longer thrust tail on the big near-miss ships. */
+  /* a ship passing the window: a distinct swoosh per hull design (0-3), always the same design -> same sound, and sounds from several ships can overlay freely since each is its own set of nodes. A bit louder/longer thrust tail on the big near-miss ships. `mul` stretches the whole envelope so it tracks how long the ship actually stays on screen, instead of a fixed <2s blip ending while a 5-11s flight is still clearly visible. */
   var SWOOSH=[
-    function(big){sweep("sine",1900,260,0,big?1.7:.9,big?.17:.11,6500,1200);noise(0,.15,.08,"highpass",3200,3200)},
-    function(big){sweep("sawtooth",900,160,0,big?1.9:1.0,big?.16:.1,2200,500);noise(0,.18,.09,"bandpass",1200,2200,1.5)},
-    function(big){sweep("triangle",2200,320,.02,big?1.8:.85,big?.15:.09,7200,1500);noise(.02,.13,.07,"highpass",4200,4200)},
-    function(big){sweep("square",1150,210,0,big?2.0:1.05,big?.14:.09,2600,600);noise(0,.17,.08,"bandpass",900,1800,1.3)}
+    function(big,mul){sweep("sine",1900,260,0,(big?1.7:.9)*mul,big?.17:.11,6500,1200);noise(0,.15*mul,.08,"highpass",3200,3200)},
+    function(big,mul){sweep("sawtooth",900,160,0,(big?1.9:1.0)*mul,big?.16:.1,2200,500);noise(0,.18*mul,.09,"bandpass",1200,2200,1.5)},
+    function(big,mul){sweep("triangle",2200,320,.02,(big?1.8:.85)*mul,big?.15:.09,7200,1500);noise(.02,.13*mul,.07,"highpass",4200,4200)},
+    function(big,mul){sweep("square",1150,210,0,(big?2.0:1.05)*mul,big?.14:.09,2600,600);noise(0,.17*mul,.08,"bandpass",900,1800,1.3)}
   ];
-  function shipSwoosh(d,big){var f=SWOOSH[((d%4)+4)%4]; if(f)f(!!big); noise(big?.05:.02,big?.32:.14,big?.1:.06,"lowpass",big?320:420,big?130:170)}
+  function shipSwoosh(d,big,mul){mul=mul||1;var f=SWOOSH[((d%4)+4)%4]; if(f)f(!!big,mul); noise(big?.05:.02,(big?.32:.14)*mul,big?.1:.06,"lowpass",big?320:420,big?130:170); ambientDuck(big?.5:.15,big?1.2:.8)}
   /* hyperspace jump boom */
-  function boomSfx(){tone(50,0,.6,"sine",.3,28);noise(0,.5,.22,"lowpass",220,55);clunk(.03)}
+  function boomSfx(){tone(50,0,.6,"sine",.3,28);noise(0,.5,.22,"lowpass",220,55);clunk(.03);ambientDuck(.6,1.1)}
   /* stylized computer-voice greeting at boot, not real speech -- a rising, warmer phrase than the plain system-check beeps */
   function voiceLine(){tone(523,0,.17,"sine",.15);tone(659,.15,.16,"sine",.14);tone(784,.3,.3,"sine",.13);sweep("sine",320,760,.04,.55,.05,4200,4200)}
-  /* a continuous engine hum for a big ship, held the whole time it's on screen, faded in and out by humSet() */
-  function humStart(){
+  /* a continuous engine hum for a big ship, held the whole time it's on screen, faded in and out by humSet(). sizeClass (bigMax, roughly 4.5-7.5) sets the pitch: bigger/closer ships get a deeper, lower-pitched hum instead of every ship sharing the same fixed tone. */
+  function humStart(sizeClass){
     var c=audio(); if(!c)return null; var t=c.currentTime, o=c.createOscillator(), o2=c.createOscillator(), g=c.createGain(), f=c.createBiquadFilter();
-    o.type="sawtooth"; o.frequency.setValueAtTime(68,t); o2.type="sine"; o2.frequency.setValueAtTime(136,t);
-    f.type="lowpass"; f.frequency.setValueAtTime(850,t);
+    var sc=sizeClass||5.5, base=Math.max(34,Math.min(100,118-sc*11));
+    o.type="sawtooth"; o.frequency.setValueAtTime(base,t); o2.type="sine"; o2.frequency.setValueAtTime(base*2,t);
+    f.type="lowpass"; f.frequency.setValueAtTime(600+sc*55,t);
     g.gain.setValueAtTime(.0001,t); o.connect(f); o2.connect(f); f.connect(g); g.connect(master);
     try{o.start(t);o2.start(t)}catch(e){}
-    return {o:o,o2:o2,g:g};
+    return {o:o,o2:o2,g:g,sc:sc};
   }
   function humSet(h,vol){if(!h)return;var c=audio();if(!c)return;var t=c.currentTime;try{h.g.gain.cancelScheduledValues(t);h.g.gain.setTargetAtTime(Math.max(.0001,vol),t,.22)}catch(e){}}
   function humStop(h){if(!h)return;var c=audio();var t=c?c.currentTime:0;try{h.g.gain.cancelScheduledValues(t);h.g.gain.setTargetAtTime(.0001,t,.3)}catch(e){}try{h.o.stop(t+.7);h.o2.stop(t+.7)}catch(e){}}
+  /* lo-fi ambient bed: a soft, slow pad that plays only while the HUD is open, so the ship/UI sounds have something to sit on top of instead of popping out of silence. ambientDuck() ducks it under the louder ship sounds instead of the two clashing. */
+  var ambient=null;
+  function ambientStart(){
+    if(muted||ambient)return; var c=audio(); if(!c)return; var t=c.currentTime;
+    var g=c.createGain(); g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.09,t+2.4); g.connect(master);
+    var filt=c.createBiquadFilter(); filt.type="lowpass"; filt.frequency.setValueAtTime(900,t); filt.connect(g);
+    var o1=c.createOscillator(), o2=c.createOscillator(), o3=c.createOscillator();
+    o1.type="triangle"; o1.frequency.setValueAtTime(110,t);  /* A2 */
+    o2.type="triangle"; o2.frequency.setValueAtTime(165,t);  /* a fifth above o1 */
+    o3.type="sine"; o3.frequency.setValueAtTime(55,t);       /* sub, an octave below o1 */
+    o1.connect(filt); o2.connect(filt); o3.connect(filt);
+    var lfo=c.createOscillator(), lfoGain=c.createGain();
+    lfo.type="sine"; lfo.frequency.setValueAtTime(.055,t); lfoGain.gain.setValueAtTime(260,t); lfo.connect(lfoGain); lfoGain.connect(filt.frequency);
+    var wob=c.createOscillator(), wobGain=c.createGain();
+    wob.type="sine"; wob.frequency.setValueAtTime(.18,t); wobGain.gain.setValueAtTime(1.6,t); wob.connect(wobGain); wobGain.connect(o2.frequency);
+    /* a quiet stereo focus layer sitting underneath the pad: two pure tones, one per ear, a carrier and that same carrier plus 10Hz. The 10Hz gap between the ears is in the "alpha" band some concentration/binaural-beat research points at for relaxed focus -- the evidence for a real effect is mixed, so this is kept subtle rather than treated as a guarantee. Needs headphones: through speakers both tones just blend into the room and the effect is lost. */
+    var merger=null, beatL=null, beatR=null;
+    if(c.createChannelMerger){
+      merger=c.createChannelMerger(2);
+      beatL=c.createOscillator(); beatR=c.createOscillator();
+      var beatGL=c.createGain(), beatGR=c.createGain();
+      beatL.type="sine"; beatL.frequency.setValueAtTime(136,t);
+      beatR.type="sine"; beatR.frequency.setValueAtTime(146,t); /* 136 -> 146 = a 10Hz binaural gap, alpha range */
+      beatGL.gain.setValueAtTime(.018,t); beatGR.gain.setValueAtTime(.018,t);
+      beatL.connect(beatGL); beatGL.connect(merger,0,0); beatR.connect(beatGR); beatGR.connect(merger,0,1);
+      merger.connect(g);
+    }
+    try{o1.start(t);o2.start(t);o3.start(t);lfo.start(t);wob.start(t);if(beatL){beatL.start(t);beatR.start(t)}}catch(e){}
+    var crackleTimer=setInterval(function(){if(ambient)noise(0,.5+Math.random()*.6,.012,"bandpass",500+Math.random()*1800,500+Math.random()*1800,2)},1400);
+    var oscList=[o1,o2,o3,lfo,wob]; if(beatL)oscList.push(beatL,beatR);
+    ambient={g:g,filt:filt,osc:oscList,crackleTimer:crackleTimer,base:.09,duckDeepest:0,duckTimer:null,restUntil:0,restTimer:null,restBackTimer:null};
+    /* every 18-40s, let the filter brighten up and settle back down over several seconds -- an occasional, noticeable swell on top of the constant micro-wobble above, so the pad moves sometimes instead of sitting totally static */
+    (function(){
+      var a=ambient;
+      (function scheduleSwell(){
+        a.swellTimer=setTimeout(function(){
+          if(ambient!==a)return; var c2=audio(); if(!c2)return; var t2=c2.currentTime;
+          try{a.filt.frequency.cancelScheduledValues(t2);a.filt.frequency.setTargetAtTime(900+600+Math.random()*500,t2,3.5);a.filt.frequency.setTargetAtTime(900,t2+7,4.5)}catch(e){}
+          scheduleSwell();
+        },18000+Math.random()*22000);
+      })();
+      /* a deliberate, frequent rest: 8-20s after it's last fully back on, the bed fades all the way out and stays silent for 8-16s, then fades back in -- and only once it's actually back does the next 8-20s gap start counting, so rests never overlap or stack. ambientDuck() checks restUntil and leaves it alone while a rest is in progress, so a ship sound firing mid-rest can't cut it short. */
+      (function scheduleRest(){
+        a.restTimer=setTimeout(function(){
+          if(ambient!==a)return; var c2=audio(); if(!c2)return; var t2=c2.currentTime, hold=8000+Math.random()*8000;
+          a.restUntil=performance.now()+900+hold+200;
+          try{a.g.gain.cancelScheduledValues(t2);a.g.gain.setTargetAtTime(.0001,t2,.35)}catch(e){}
+          a.restBackTimer=setTimeout(function(){
+            if(ambient!==a)return; var c3=audio(); if(!c3)return; var t3=c3.currentTime;
+            try{a.g.gain.cancelScheduledValues(t3);a.g.gain.setTargetAtTime(a.base,t3,1.1)}catch(e){}
+            scheduleRest(); /* only chain the next gap once this rest has actually finished and faded back in */
+          },900+hold);
+        },8000+Math.random()*12000);
+      })();
+    })();
+  }
+  function ambientStop(){
+    if(!ambient)return; var a=ambient; ambient=null; var c=audio(); var t=c?c.currentTime:0;
+    clearInterval(a.crackleTimer); clearTimeout(a.swellTimer); clearTimeout(a.duckTimer); clearTimeout(a.restTimer); clearTimeout(a.restBackTimer);
+    try{a.g.gain.cancelScheduledValues(t);a.g.gain.setTargetAtTime(.0001,t,.6)}catch(e){}
+    a.osc.forEach(function(o){try{o.stop(t+1.4)}catch(e){}});
+  }
+  /* ducking used to schedule its own dip-then-recover ramp on every single call -- with several ship sounds firing within a couple of seconds of each other, each new call cancelled the previous one's not-yet-finished recovery and redipped, so the pad could get stuck hovering near-silent for a few seconds at unpredictable moments tied to ship traffic, not as a deliberate effect. Fix: track only the deepest duck requested and debounce the recovery to one single ramp that starts shortly after the last sound event, instead of racing ramps against each other. It also now steps aside entirely during a deliberate rest (see scheduleRest above), so ship sounds can't cut a rest short. */
+  function ambientDuck(amt,rec){
+    if(!ambient)return; if(ambient.restUntil&&performance.now()<ambient.restUntil)return;
+    var c=audio(); if(!c)return; var a=ambient, t=c.currentTime;
+    a.duckDeepest=Math.max(a.duckDeepest||0,amt);
+    clearTimeout(a.duckTimer);
+    try{a.g.gain.cancelScheduledValues(t);a.g.gain.setTargetAtTime(Math.max(.0001,a.base*(1-a.duckDeepest)),t,.09)}catch(e){}
+    a.duckTimer=setTimeout(function(){
+      if(ambient!==a)return; a.duckDeepest=0;
+      if(ambient.restUntil&&performance.now()<ambient.restUntil)return;
+      var c2=audio(); if(!c2)return; var t2=c2.currentTime;
+      try{a.g.gain.cancelScheduledValues(t2);a.g.gain.setTargetAtTime(a.base,t2,rec||.9)}catch(e){}
+    },380);
+  }
   var sfx={boom:boomSfx,
     ping:ping,whistle:whistle,warp:warp,shimmer:shimmer,scan:scan,beam:beam,
     /* pressed Engage: a big machine waking up */
@@ -553,7 +630,7 @@ table.xpt td:last-child{color:var(--amber)}
   var soundBtn=$("sound");
   function paintSound(){soundBtn.textContent=muted?"Sound off":"Sound on";soundBtn.setAttribute("aria-pressed",muted?"false":"true")}
   paintSound();
-  soundBtn.addEventListener("click",function(){muted=!muted;try{localStorage.setItem("console-muted",muted?"1":"0")}catch(e){}paintSound();if(!muted)sfx.toggle()});
+  soundBtn.addEventListener("click",function(){muted=!muted;try{localStorage.setItem("console-muted",muted?"1":"0")}catch(e){}paintSound();if(!muted){sfx.toggle();if(bridge&&bridge.classList.contains("intro"))ambientStart()}else ambientStop()});
 
   /* ---------- starfield ---------- */
   (function(){
@@ -632,7 +709,7 @@ table.xpt td:last-child{color:var(--amber)}
       var greebN=Math.max(2,Math.round(sizeClass*(k==="pass"?2.2:2.6)));
       s.greeb=[]; for(var gi=0;gi<greebN;gi++)s.greeb.push([R(-50,36),R(-12,12),R(-8,8),R(-8,8)]);
       ships.push(s);
-      if(shipAudioOn){shipSwoosh(s.d,k==="pass");if(k==="pass")s.hum=humStart()}
+      if(shipAudioOn){shipSwoosh(s.d,k==="pass",Math.min(3,Math.max(1,s.dur/5)));if(k==="pass"){s.hum=humStart(sizeClass);s.humPeak=.055+(Math.min(7.5,Math.max(4.5,sizeClass))-4.5)/3*.095}}
     }
     function drawShip(s,dt){
       var p=s.t/s.dur, px, py, sc, view="side", rot=0, flip=1;
@@ -649,8 +726,8 @@ table.xpt td:last-child{color:var(--amber)}
         x.strokeStyle=g;x.lineWidth=Math.max(1.5,10*sc*(1-s.jt/.5));x.lineCap="round";x.beginPath();x.moveTo(px,py);x.lineTo(px+hx*len,py+hy*len);x.stroke();
         if(!s.boom){s.boom=1;flash=1;if(shipAudioOn)boomSfx()}
         if(s.jt>.5)s.t=s.dur+1; return}
-      if(s.kind==="pass"&&s.hum){ /* a continuous hum for the whole time a big ship is on screen, fading in as it appears and out as it leaves */
-        var hv=p<.12?(p/.12)*.1:p>.85?Math.max(0,(1-p)/.15)*.1:.1; humSet(s.hum,hv);
+      if(s.kind==="pass"&&s.hum){ /* a continuous hum for the whole time a big ship is on screen, fading in as it appears and out as it leaves. Peak loudness scales with the ship's size (humPeak), same as its pitch does, so a big close ship is both deeper and louder than a small one. */
+        var pk=s.humPeak||.1, hv=p<.12?(p/.12)*pk:p>.85?Math.max(0,(1-p)/.15)*pk:pk; humSet(s.hum,hv);
       }
       if(s.kind==="cross"){ /* fading engine trail, in screen space, drawn before the hull so it sits behind it */
         var ex=px-62*sc*flip, ey=py;
@@ -708,12 +785,13 @@ table.xpt td:last-child{color:var(--amber)}
     if(!bridge.classList.contains("intro"))return;
     bridge.classList.remove("intro"); sfx.close();
     shipAudioOn=false; if(stopShipAudio)stopShipAudio(); /* the ships are still flying in the compact bar, but go quiet once the HUD closes */
+    ambientStop();
     paintHud();
   }
   /* reopen the full HUD from the compact bar -- the HUD button in the header is the only way back in, now that the ring is just a readout */
   function openHud(){
     if(bridge.classList.contains("intro"))return;
-    bridge.classList.add("intro"); sfx.hail(); shipAudioOn=true; armIntro(); paintHud();
+    bridge.classList.add("intro"); sfx.hail(); shipAudioOn=true; ambientStart(); armIntro(); paintHud();
   }
   function toggleHud(){if(bridge.classList.contains("intro"))collapseHud();else openHud()}
   $("hud").addEventListener("click",toggleHud);
@@ -747,7 +825,7 @@ table.xpt td:last-child{color:var(--amber)}
     lines.forEach(function(t,i){setTimeout(function(){var s=el("span",null,t);log.appendChild(s);setTimeout(function(){s.className="ok";if(i===0)voiceLine()},260)},i*step)});
     setTimeout(function(){
       boot.classList.add("out"); bridge.classList.add("intro"); armIntro();
-      reveal(!!sound); revealBridge(!!sound);
+      reveal(!!sound); revealBridge(!!sound); if(sound)ambientStart();
     },lines.length*step+500);
   }
   function startCountdown(){
