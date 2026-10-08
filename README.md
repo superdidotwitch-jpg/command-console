@@ -59,6 +59,10 @@ Call `render()` again any time `state.today` changes. Where that object comes fr
 
 A few features (`window.claude.use("db")`, `.use("mcp")`, `.use("sample")`) only exist when this page runs as a Claude artifact. Every one of them is already wrapped in a check for whether `window.claude` exists, so outside Claude they just quietly do nothing, the rest of the page works exactly the same. You can delete them if you don't want them, or leave them as an example of the pattern.
 
+The draft cards can also work on the real Gmail draft behind them: revising a draft rewrites the matching Gmail draft (found by its thread), and a two-press Send button sends it. That needs the page published with the Gmail connector's `list_drafts`, `update_draft` and `send_message` tools, and `GMAIL_ACCOUNT` set to your own address.
+
+Once you scroll down the page, the pinned bar shrinks to its header row, so the status lights and number tiles stay at the top instead of following you.
+
 Two things in there are placeholders on purpose and need your own values before they'll do anything: `QUIZ_TRIGGER_ID` (a scheduled task id, only matters if you want the "start a quiz" style button) and the prompt text inside `reviseDraft()` (only matters if you want the live draft-revision feature; swap in your own name and writing style).
 
 ## Rules the brief follows

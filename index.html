@@ -162,6 +162,10 @@ button.ti:hover{background:var(--line)}
 .badge.g{border-color:var(--green)} .badge.g i{background:var(--green);box-shadow:0 0 6px var(--green)}
 /* once the HUD is collapsed, only the tiles and ring stay -- the badges are for the full, "look closer" view */
 .bridge:not(.intro) .badges{display:none}
+/* scrolled down the page: the pinned bar keeps only its header row (name, date, HUD, Sound), so the status lights and number tiles no longer follow you over every station */
+.bridge.slim:not(.intro){padding-bottom:10px}
+.bridge.slim:not(.intro) .lights,.bridge.slim:not(.intro) .read{display:none}
+.bridge.slim:not(.intro) .top{border-bottom:0;padding-bottom:0}
 
 /* readouts: thin cockpit-instrument strip along the bottom edge of the window */
 .read{display:flex;flex-wrap:wrap;gap:6px}
@@ -625,7 +629,11 @@ table.xpt td:last-child{color:var(--amber)}
     copy:function(){droid(0,3,0)},
     go:function(){laser(0);laser(.11)},
     alert:function(){tone(520,0,.16,"square",.09);tone(390,.18,.24,"square",.09)},
-    toggle:function(){droid(0,4,1)}
+    toggle:function(){droid(0,4,1)},
+    /* arming the send: three rising beeps */
+    arm:function(){tone(660,0,.09,"square",.08);tone(880,.11,.09,"square",.08);tone(1320,.22,.16,"triangle",.1)},
+    /* message away: an outbound transmission burst */
+    send:function(){sweep("sine",400,3200,0,.35,.12,9000,9000);noise(.05,.3,.08,"highpass",2500,6000);tone(1568,.38,.3,"sine",.12);tone(2093,.5,.4,"sine",.08)}
   };
   var soundBtn=$("sound");
   function paintSound(){soundBtn.textContent=muted?"Sound off":"Sound on";soundBtn.setAttribute("aria-pressed",muted?"false":"true")}
@@ -791,8 +799,11 @@ table.xpt td:last-child{color:var(--amber)}
   /* reopen the full HUD from the compact bar -- the HUD button in the header is the only way back in, now that the ring is just a readout */
   function openHud(){
     if(bridge.classList.contains("intro"))return;
-    bridge.classList.add("intro"); sfx.hail(); shipAudioOn=true; ambientStart(); armIntro(); paintHud();
+    setSlim(false); bridge.classList.add("intro"); sfx.hail(); shipAudioOn=true; ambientStart(); armIntro(); paintHud();
   }
+  /* slim = the pinned bar reduced to its header row. Only matters where the bar is pinned (wide screens); two thresholds far apart so the height change can never flip it back and forth */
+  function setSlim(on){if(bridge.classList.contains("slim")!==on)bridge.classList.toggle("slim",on)}
+  function pinned(){return getComputedStyle(bridge).position==="sticky"}
   function toggleHud(){if(bridge.classList.contains("intro"))collapseHud();else openHud()}
   $("hud").addEventListener("click",toggleHud);
   /* unified click-anything behaviour: shrink the HUD and jump to whatever was clicked */
@@ -801,6 +812,7 @@ table.xpt td:last-child{color:var(--amber)}
     if(sectionId||focusId){
       setTimeout(function(){
         var tgt=(focusId&&$(focusId))||(sectionId&&$(sectionId));
+        if(tgt&&pinned()&&tgt.getBoundingClientRect().top+(window.scrollY||0)>320)setSlim(true);
         if(tgt)tgt.scrollIntoView({behavior:reduce?"auto":"smooth",block:"start"});
       },reduce?0:80);
     }
@@ -816,6 +828,9 @@ table.xpt td:last-child{color:var(--amber)}
     var y=window.scrollY||0;
     if(bridge.classList.contains("intro")&&Date.now()-introOpenedAt>=700&&y-lastScrollY>8)collapseHud();
     lastScrollY=y;
+    if(bridge.classList.contains("intro")||!pinned())setSlim(false);
+    else if(y>240)setSlim(true);
+    else if(y<40)setSlim(false);
   },{passive:true});
 
   var autoTimer=null, countTimer=null;
@@ -836,7 +851,7 @@ table.xpt td:last-child{color:var(--amber)}
   }
   function replay(){
     booted=false; window.scrollTo(0,0); clearTimeout(autoTimer); clearInterval(countTimer);
-    boot.classList.remove("out"); wrap.classList.add("pre"); bridge.classList.remove("on","intro");
+    boot.classList.remove("out"); wrap.classList.add("pre"); bridge.classList.remove("on","intro","slim");
     clear($("bootlog")); $("engage").hidden=false; $("count").textContent="Presence detected";
     startCountdown();
   }
@@ -956,18 +971,40 @@ table.xpt td:last-child{color:var(--amber)}
         var rv=rev[key]||(rev[key]={text:"",busy:false,msg:"",ask:""}), cur=rv.text||x.draft;
         var dr=el("div","draft"), pre=el("pre",null,rv.busy&&!rv.text?"Thinking...":cur); pre.id="pre-"+key; dr.appendChild(pre);
         if(x.draftNote&&!rv.text)dr.appendChild(el("span","check","Check before sending: "+x.draftNote));
-        if(rv.text&&!rv.busy)dr.appendChild(el("span","check","Revised version saved. Tell Claude in chat to send it, or copy it into the Gmail draft."));
+        var mine=x.account===GMAIL_ACCOUNT, sd=snd[key]||(snd[key]={step:"",msg:"",busy:false}), g=gd[key];
+        if((rv.text||rv.sync)&&!rv.busy){var sy=rv.sync;
+          dr.appendChild(el("span",sy==="ok"?"sentok":"check",sy==="ok"?"This text is now in your Gmail draft.":sy==="busy"?"Updating your Gmail draft...":sy==="fail"?"The Gmail draft was not updated. "+(rv.syncMsg||""):sy==="none"?"No Gmail draft was found for this thread, so copy the text across or tell Claude in chat.":"Revised version saved on the console only."))}
         var rb=el("div","rev"), inp=el("input"); inp.type="text"; inp.id="rev-"+key; inp.placeholder="What should change? For example: shorter, add the RAM and SSDs"; inp.value=rv.ask; inp.setAttribute("aria-label","What should change in this draft");
         inp.addEventListener("input",function(){rv.ask=inp.value});
         var go=el("button","btn",rv.busy?"Revising...":"Revise with Claude"); go.type="button"; go.disabled=rv.busy;
         function run(){if(rv.busy)return;if(!rv.ask.trim()){rv.msg="Type what should change first.";render();return}reviseDraft(key,x)}
-        go.addEventListener("click",run); inp.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();run()}});
+        go.disabled=rv.busy||sd.busy; go.addEventListener("click",run); inp.addEventListener("keydown",function(e){if(e.key==="Enter"){e.preventDefault();run()}});
         rb.appendChild(inp); rb.appendChild(go); dr.appendChild(rb); if(rv.msg)dr.appendChild(el("span","note",rv.msg));
         var da=el("div","acts"), cb=el("button","btn","Copy text");cb.type="button";
         if(wasSent){dr.appendChild(el("span","sentok","Sent from "+(x.account||"your account")+" at "+wasSent+"."))}
         cb.addEventListener("click",function(){var txt=rev[key].text||x.draft, ok=function(){cb.textContent="Copied";sfx.copy()};try{navigator.clipboard.writeText(txt).then(ok,function(){cb.textContent="Select the text to copy"})}catch(e){cb.textContent="Select the text to copy"}});
-        da.appendChild(cb); if(rv.text&&!rv.busy){var ub=el("button","btn","Back to first draft");ub.type="button";ub.addEventListener("click",function(){rv.text="";rv.msg="";sfx.close();render();saveRevisions()});da.appendChild(ub)}
-        var du=safeUrl(gm(x.draftUrl,x.account)); if(du)da.appendChild(link("Open draft in Gmail",du,"btn hot",shimmer)); dr.appendChild(da); m.appendChild(dr)}
+        da.appendChild(cb); if(rv.text&&!rv.busy){var ub=el("button","btn","Back to first draft");ub.type="button";ub.addEventListener("click",function(){rv.text="";rv.msg="";sd.step="";sfx.close();render();saveRevisions();if(mine)syncGmail(key,x,x.draft)});da.appendChild(ub)}
+        if(mine&&rv.text&&!rv.busy&&rv.sync!=="ok"&&rv.sync!=="busy"&&!wasSent){var wb=el("button","btn","Write to Gmail draft");wb.type="button";wb.addEventListener("click",function(){sfx.copy();syncGmail(key,x,rv.text)});da.appendChild(wb)}
+        var du=safeUrl(gm(x.draftUrl,x.account)); if(du)da.appendChild(link("Open draft in Gmail",du,"btn",shimmer)); dr.appendChild(da);
+        /* send from the card: first press finds the real Gmail draft and shows who it goes to, second press sends it */
+        if(!wasSent){
+          if(!mine)dr.appendChild(el("span","note","Sending from the console works for "+GMAIL_ACCOUNT+" mail only. For this one, tell Claude in chat."));
+          else{
+            var sa=el("div","acts");
+            if(sd.step==="confirm"&&g){
+              var same=norm(g.text)===norm(cur);
+              dr.appendChild(el("span","check","Ready to send from "+(g.from||x.account)+" to "+(g.to||"the recipient on the draft")+". Subject: "+(g.subject||"(none)")+"."));
+              if(!same&&rv.text)dr.appendChild(el("span","check","The text above will be written to the Gmail draft first, then sent."));
+              if(!same&&!rv.text){dr.appendChild(el("span","check","Your Gmail draft is different from the text above. This Gmail version is what gets sent:"));dr.appendChild(el("pre",null,g.text))}
+              var yb=el("button","btn hot",sd.busy?"Sending...":"Confirm send");yb.type="button";yb.disabled=sd.busy;yb.addEventListener("click",function(){sendConfirm(key)});sa.appendChild(yb);
+              var nb=el("button","btn","Cancel");nb.type="button";nb.disabled=sd.busy;nb.addEventListener("click",function(){sd.step="";sd.msg="";sfx.close();render()});sa.appendChild(nb);
+            }else{
+              var sb=el("button","btn hot",sd.busy?"Checking Gmail...":"Send this reply");sb.type="button";sb.disabled=sd.busy||rv.busy||rv.sync==="busy";sb.addEventListener("click",function(){sendStart(key,x)});sa.appendChild(sb);
+            }
+            dr.appendChild(sa); if(sd.msg)dr.appendChild(el("span","check",sd.msg));
+          }
+        }
+        m.appendChild(dr)}
       return m}
     if(rep.length){M.appendChild(el("span","sub","Needs a reply"));rep.forEach(function(x,i){M.appendChild(msg(x,"reply",i))})}
     if(tk.length){M.appendChild(el("span","sub","Pending and tracked"));tk.forEach(function(x,i){M.appendChild(msg(x,"track",i))})}
@@ -1127,6 +1164,7 @@ table.xpt td:last-child{color:var(--amber)}
       if(!sample){rv.busy=false;rv.text=before;rv.msg="This view cannot ask Claude. Ask in chat to revise it instead.";render();return}
       sample(prompt,{cache:false,onText:function(u){rv.text=u.text;var p2=$("pre-"+key);if(p2)p2.textContent=u.text}}).then(function(r){
         rv.busy=false;rv.text=r.text;rv.msg=r.truncated?"The answer was cut short. Ask for less at a time.":"";rv.ask="";droid(0,4,1);render();saveRevisions();
+        if(!r.truncated&&x.account===GMAIL_ACCOUNT)syncGmail(key,x,r.text);
       },function(e){
         var c=e&&e.code; rv.busy=false; rv.text=before; sfx.alert();
         rv.msg=c==="not_granted"||c==="sampling_disabled"||c==="capability_disabled"?"Claude is not allowed on this page, so the draft was not changed."
@@ -1135,6 +1173,77 @@ table.xpt td:last-child{color:var(--amber)}
           :"The revision did not come through ("+(c||"unknown")+"). Press Revise again."; render();
       });
     },function(){rv.busy=false;rv.text=before;rv.msg="This view cannot ask Claude.";render()});
+  }
+  /* ---------- Gmail: the real draft behind a console draft ----------
+     The console's draft text is only a copy. These find the matching draft in Gmail (same thread), rewrite it when the text is revised here, and send it.
+     Every send is two presses, and a failed send is never retried automatically. */
+  /* Example: put the address of the mailbox your own Gmail connector is signed in to. Drafts for any other account get no send button. */
+  var GMAIL="Gmail", GMAIL_ACCOUNT="you@example.com", gd={}, snd={};
+  function esc(t){return String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
+  function norm(t){return String(t||"").replace(/\s+/g," ").trim()}
+  function hexId(t){return String(t||"").toLowerCase().replace(/^0+/,"")}
+  function threadHex(x){var m=typeof x.url==="string"&&x.url.match(/thread-f:(\d+)/);if(!m)return null;try{return BigInt(m[1]).toString(16)}catch(e){return null}}
+  /* a reply draft is "my text" followed by the quoted thread; keep the quote untouched and read or replace only my text */
+  function splitHtml(h){h=String(h||"");var i=h.indexOf('<div class="gmail_extra">');if(i<0)i=h.indexOf('<blockquote');
+    var top=i<0?h:h.slice(0,i), text="";
+    try{text=new DOMParser().parseFromString(top.replace(/<br\s*\/?>/gi,"\n").replace(/<\/(div|p)>/gi,"\n"),"text/html").body.textContent.replace(/\n{3,}/g,"\n\n").trim()}catch(e){}
+    return {text:text,quote:i<0?"":h.slice(i)}}
+  function gmailErr(e){var c=e&&e.code;
+    return c==="not_in_manifest"||c==="consent_required"||c==="not_granted"?"Gmail is not allowed on this page. Allow it in the page's Permissions menu, then press again."
+      :c==="needs_reauth"?"Gmail needs reconnecting in Claude's Settings, under Connectors."
+      :c==="server_not_connected"||c==="selection_required"||c==="server_not_found"?"The Gmail connector is not available to this page. Add or choose it in Claude's Settings, under Connectors."
+      :c==="blocked_by_policy"||c==="approval_required"?"Your account settings block this Gmail action from the page."
+      :c==="capability_disabled"||c==="capability_removed"?"This view cannot reach Gmail. Open the console inside Claude."
+      :c==="tool_error"?"Gmail refused it: "+String((e&&e.message)||"no reason given").slice(0,180)
+      :null}
+  function gmail(tool,input){return window.claude.use("mcp").then(function(mcp){if(!mcp)throw {code:"capability_disabled"};return mcp.callTool(GMAIL,tool,input,{cache:false})})}
+  function findDraft(key,x){
+    return gmail("list_drafts",{pageSize:50,view:"DRAFT_VIEW_FULL"}).then(function(r){
+      var p=r&&r.payload, list=(p&&Array.isArray(p.drafts))?p.drafts:[], th=threadHex(x), hit=null;
+      list.forEach(function(d){if(!hit&&d&&((x.draftId&&d.id===x.draftId)||(th&&hexId(d.threadId)===hexId(th))))hit=d});
+      if(!hit){gd[key]=null;return null}
+      var parts=splitHtml(hit.htmlBody);
+      gd[key]={id:hit.id,to:(Array.isArray(hit.toRecipients)?hit.toRecipients:[]).join(", "),from:hit.sender||"",subject:hit.subject||"",quote:parts.quote,text:parts.text};
+      return gd[key];
+    });
+  }
+  function writeDraft(key,text){var g=gd[key];
+    var html='<div dir="auto">'+esc(text).replace(/\r?\n/g,"<br>")+'</div>'+(g.quote?"<br>"+g.quote:"");
+    return gmail("update_draft",{draftId:g.id,body:text,htmlBody:html}).then(function(r){var p=r&&r.payload;if(p&&typeof p.id==="string")g.id=p.id;g.text=text;return g})}
+  function syncGmail(key,x,text){
+    var rv=rev[key]||(rev[key]={text:"",busy:false,msg:"",ask:""}); if(rv.sync==="busy")return;
+    rv.sync="busy"; rv.syncMsg=""; render();
+    findDraft(key,x).then(function(g){
+      if(!g){rv.sync="none";render();return}
+      return writeDraft(key,text).then(function(){rv.sync="ok";droid(0,3,1);render()});
+    }).catch(function(e){rv.sync="fail";rv.syncMsg=gmailErr(e)||"Could not confirm the update. Open the draft in Gmail to check it.";sfx.alert();render()});
+  }
+  function sendStart(key,x){
+    var sd=snd[key]||(snd[key]={step:"",msg:"",busy:false}); if(sd.busy)return;
+    sd.busy=true; sd.msg=""; sd.step=""; sfx.arm(); render();
+    findDraft(key,x).then(function(g){
+      sd.busy=false;
+      if(!g){sd.msg="No Gmail draft was found for this thread, so there is nothing to send from here. Tell Claude in chat to send it.";sfx.alert()}
+      else sd.step="confirm";
+      render();
+    }).catch(function(e){sd.busy=false;sd.msg=gmailErr(e)||"Could not read your Gmail drafts just now. Press again in a moment.";sfx.alert();render()});
+  }
+  function sendConfirm(key){
+    var sd=snd[key], g=gd[key], rv=rev[key]; if(!sd||sd.busy||!g)return;
+    var text=rv&&rv.text, need=!!text&&norm(text)!==norm(g.text), stage="update";
+    sd.busy=true; sd.msg=""; render();
+    (need?writeDraft(key,text):Promise.resolve()).then(function(){stage="send";return gmail("send_message",{draftId:gd[key].id})}).then(function(){
+      sd.busy=false; sd.step=""; sfx.send();
+      var t=new Date(), at=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2), ids={};
+      Object.keys(state.sent).forEach(function(k){ids[k]=state.sent[k]}); ids[key]=at; state.sent=ids; render();
+      if(db&&tickDate)db.doc("sent/"+tickDate).set({ids:ids}).catch(function(){});
+    }).catch(function(e){
+      var known=gmailErr(e); sd.busy=false; sd.step="";
+      sd.msg=stage==="update"?"Nothing was sent. "+(known||"The Gmail draft could not be updated first.")
+        :known?"Not sent. "+known
+        :"Not sure whether it was sent. Check Sent in Gmail before pressing Send again.";
+      sfx.alert(); render();
+    });
   }
   function toggleArd(k){
     if(!db||ardWriting)return; var next={};Object.keys(state.ard).forEach(function(x){if(state.ard[x])next[x]=true});
