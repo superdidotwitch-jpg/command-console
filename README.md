@@ -61,6 +61,14 @@ A few features (`window.claude.use("db")`, `.use("mcp")`, `.use("sample")`) only
 
 Two things in there are placeholders on purpose and need your own values before they'll do anything: `QUIZ_TRIGGER_ID` (a scheduled task id, only matters if you want the "start a quiz" style button) and the prompt text inside `reviseDraft()` (only matters if you want the live draft-revision feature; swap in your own name and writing style).
 
+## Rules the brief follows
+
+The page only draws what it is given. In the original setup a scheduled morning brief builds `state.today` every day, and these are the rules it follows when deciding what goes on screen. None of them are in `index.html`, they live in whatever fills the data, so copy the ones that fit your own setup.
+
+- **Follow up on quiet quotes.** For a customer quote or job that is waiting on the customer, keep the date of your last message to them. Count business days only, Monday to Friday. Once 4 business days pass with no reply, flag it as needing a follow-up instead of leaving it as "waiting on customer".
+- **Show a routine bill once.** A recurring bill appears as a new item the first time, then drops off the list. It only comes back if it is due within 3 days and still not confirmed as paid, or if a different bill arrives.
+- **Cross-check the next step.** Before picking the "next" step for a project, read the most recently updated notes on that topic, not only the project's own summary. A summary can go stale while the real work has moved on.
+
 ## Sound
 
 Every sound in the file is synthesized from raw oscillators and filtered noise, Web Audio API only, nothing downloaded. Look for the `sfx` object and the functions above it (`tone`, `sweep`, `noise`, `clunk`, and so on) if you want to retune anything or add your own.
