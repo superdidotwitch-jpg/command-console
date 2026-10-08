@@ -63,7 +63,9 @@ The draft cards can also work on the real Gmail draft behind them: revising a dr
 
 Once you scroll down the page, the pinned bar shrinks to its header row, so the status lights and number tiles stay at the top instead of following you.
 
-Two things in there are placeholders on purpose and need your own values before they'll do anything: `QUIZ_TRIGGER_ID` (a scheduled task id, only matters if you want the "start a quiz" style button) and the prompt text inside `reviseDraft()` (only matters if you want the live draft-revision feature; swap in your own name and writing style).
+The Refresh button in the header starts a fresh run of whatever scheduled task fills the console, then waits: the page is already listening to its data, so the new numbers appear by themselves when the run finishes. It is two presses, because a full run takes a while and costs usage, and it locks for 30 minutes after a start so one run cannot be started twice.
+
+Three things in there are placeholders on purpose and need your own values before they'll do anything: `QUIZ_TRIGGER_ID` (a scheduled task id, only matters if you want the "start a quiz" style button), `BRIEF_TRIGGER` (the id of the scheduled task that fills the console, only matters if you want the Refresh button) and the prompt text inside `reviseDraft()` (only matters if you want the live draft-revision feature; swap in your own name and writing style).
 
 ## Rules the brief follows
 

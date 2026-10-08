@@ -137,6 +137,10 @@ button.ti:hover{background:var(--line)}
 .btn.hot{box-shadow:0 0 16px rgba(255,181,71,.35);background:var(--amber);border-color:var(--amber);color:var(--amber-ink);font-weight:700}
 .btn.hot:hover{filter:brightness(1.1)}
 #hud[aria-pressed="true"]{background:var(--cy);border-color:var(--cy);color:#02070d;font-weight:700}
+/* refresh: starts a fresh run of the morning brief. Its one status line sits under the header row and takes no room while empty */
+#refresh[disabled]{opacity:.55;cursor:default}
+#refMsg{font-family:var(--mono);font-size:12px;letter-spacing:.04em;color:var(--soft);text-shadow:0 2px 8px rgba(2,5,11,.9)}
+#refMsg.bad{color:var(--amber)} #refMsg.good{color:var(--green)}
 
 /* station panel */
 .st{position:relative;background:linear-gradient(90deg,transparent 4%,rgba(79,216,255,.85) 50%,transparent 96%) top/100% 2px no-repeat,linear-gradient(180deg,rgba(14,23,41,.92),rgba(11,18,34,.92));box-shadow:0 0 22px rgba(79,216,255,.06),inset 0 0 40px rgba(79,216,255,.035);border:1px solid var(--line);padding:18px;display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -162,7 +166,7 @@ button.ti:hover{background:var(--line)}
 .badge.g{border-color:var(--green)} .badge.g i{background:var(--green);box-shadow:0 0 6px var(--green)}
 /* once the HUD is collapsed, only the tiles and ring stay -- the badges are for the full, "look closer" view */
 .bridge:not(.intro) .badges{display:none}
-/* scrolled down the page: the pinned bar keeps only its header row (name, date, HUD, Sound), so the status lights and number tiles no longer follow you over every station */
+/* scrolled down the page: the pinned bar keeps only its header row (name, date, Refresh, HUD, Sound), so the status lights and number tiles no longer follow you over every station */
 .bridge.slim:not(.intro){padding-bottom:10px}
 .bridge.slim:not(.intro) .lights,.bridge.slim:not(.intro) .read{display:none}
 .bridge.slim:not(.intro) .top{border-bottom:0;padding-bottom:0}
@@ -321,10 +325,13 @@ table.xpt td:last-child{color:var(--amber)}
     <span class="brand">Command Console</span>
     <div class="r">
       <span class="date" id="date">Awaiting morning brief</span>
+      <button class="btn" id="refresh" type="button">Refresh</button>
       <button class="btn" id="hud" type="button" aria-pressed="false">HUD</button>
       <button class="btn" id="sound" type="button" aria-pressed="true">Sound on</button>
     </div>
   </div>
+
+  <p id="refMsg" aria-live="polite" hidden></p>
 
   <div class="lights hud-piece" id="lights" aria-label="System status"></div>
 
@@ -497,6 +504,13 @@ table.xpt td:last-child{color:var(--amber)}
   function readout(up){for(var i=0;i<9;i++)tone(up?700+i*140:1900-i*140,i*.035,.03,"square",.05)}
   /* servo and lock: ticking an Arduino project */
   function servo(on){sweep("sawtooth",on?180:420,on?420:180,0,.22,.1,1200,2400);noise(0,.22,.05,"bandpass",2000,3000,3);clunk(.22);if(on)droid(.3,3,1)}
+  /* long-range uplink: the Refresh button. armed = the first press, a short query; otherwise the dish sweeping out and a carrier lock */
+  function uplink(armed){
+    if(armed){tone(988,0,.08,"triangle",.1);tone(740,.1,.08,"triangle",.1);tone(988,.2,.14,"triangle",.1);return}
+    sweep("sine",260,2100,0,.6,.1,8000,8000);noise(.05,.5,.05,"bandpass",1500,5000,2);
+    for(var i=0;i<5;i++)tone(1568,.62+i*.09,.05,"square",.06);
+    tone(784,1.1,.5,"sine",.12);tone(1175,1.1,.5,"sine",.08);
+  }
   /* briefing chime: starting the quiz */
   function chime(){tone(784,0,.16,"sine",.16);tone(988,.16,.16,"sine",.16);tone(1175,.32,.16,"sine",.16);tone(1568,.48,.5,"sine",.16);sweep("sine",200,800,.48,.5,.06,5000,5000)}
   /* a ship passing the window: a distinct swoosh per hull design (0-3), always the same design -> same sound, and sounds from several ships can overlay freely since each is its own set of nodes. A bit louder/longer thrust tail on the big near-miss ships. `mul` stretches the whole envelope so it tracks how long the ship actually stays on screen, instead of a fixed <2s blip ending while a 5-11s flight is still clearly visible. */
@@ -1152,6 +1166,58 @@ table.xpt td:last-child{color:var(--amber)}
       });
     },function(){done("This view cannot start the quiz.")});
   }
+  /* ---------- Refresh: a fresh run of the "Morning brief" scheduled task ----------
+     The page cannot gather mail, calendar or notes by itself. The morning brief does that and writes console/today, which this page is already listening to,
+     so a refresh is simply: start that task now, then wait for the new data to arrive. A run is long and costs usage, so it is two presses,
+     it is never retried automatically, and the button stays locked for a while after a start so one run cannot be started twice. */
+  /* Replace YOUR_BRIEF_TRIGGER_ID with the id of the scheduled task that fills this console on your own account, or remove the Refresh button if you do not want it. */
+  var BRIEF_TRIGGER="YOUR_BRIEF_TRIGGER_ID", REF_LOCK_MS=30*60*1000, ref={step:"",busy:false,since:0,armTimer:null,lockTimer:null};
+  try{var r0=Number(localStorage.getItem("console-refresh-at"));if(isFinite(r0)&&r0>0&&Date.now()-r0<REF_LOCK_MS)ref.since=r0}catch(e){}
+  function hhmm(t){t=t||new Date();return ("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2)}
+  function refMsg(text,cls){var m=$("refMsg");if(!m)return;m.textContent=text||"";m.className=cls||"";m.hidden=!text}
+  function refLocked(){return ref.since>0&&Date.now()-ref.since<REF_LOCK_MS}
+  function paintRefresh(){
+    var b=$("refresh"); if(!b)return; var lock=refLocked();
+    b.textContent=ref.busy?"Starting...":lock?"Refresh running":ref.step==="confirm"?"Confirm refresh":"Refresh";
+    b.className="btn"+(ref.step==="confirm"&&!ref.busy&&!lock?" hot":""); b.disabled=ref.busy||lock;
+    clearTimeout(ref.lockTimer); if(lock)ref.lockTimer=setTimeout(function(){ref.since=0;paintRefresh()},REF_LOCK_MS-(Date.now()-ref.since)+500);
+  }
+  function refreshPress(){
+    if(ref.busy||refLocked())return;
+    if(ref.step!=="confirm"){
+      ref.step="confirm"; uplink(true); paintRefresh();
+      refMsg("This starts a full run of the morning brief. It takes a while and uses Claude usage. Press again to start.");
+      clearTimeout(ref.armTimer); ref.armTimer=setTimeout(function(){if(ref.step==="confirm"&&!ref.busy){ref.step="";paintRefresh();refMsg("")}},8000);
+      return;
+    }
+    clearTimeout(ref.armTimer); ref.step=""; ref.busy=true; paintRefresh(); refMsg("Contacting Claude...");
+    function fail(t){ref.busy=false;sfx.alert();paintRefresh();refMsg(t,"bad")}
+    if(!window.claude||!window.claude.use){fail("This view cannot start a refresh.");return}
+    window.claude.use("mcp").then(function(mcp){
+      if(!mcp){fail("This view cannot start a refresh. Ask Claude in chat to run the morning brief.");return}
+      mcp.callTool("Claude Code Remote","fire_trigger",{trigger_id:BRIEF_TRIGGER}).then(function(){
+        ref.busy=false; ref.since=Date.now(); try{localStorage.setItem("console-refresh-at",String(ref.since))}catch(e){}
+        uplink(false); paintRefresh();
+        refMsg("Refresh started at "+hhmm()+". The console updates by itself when the run finishes. You can keep this page open or come back later.");
+      },function(e){
+        var c=e&&e.code;
+        fail(c==="not_in_manifest"||c==="consent_required"?"You did not allow this page to start scheduled tasks, so nothing was started."
+          :c==="server_not_connected"||c==="needs_reauth"?"Claude could not reach your scheduled tasks from this page. Ask Claude in chat to run the morning brief."
+          :c==="server_unavailable"||c==="upstream_error"?"No answer from Claude. Check under Scheduled whether a Morning brief run started before pressing again."
+          :"The refresh could not be started ("+(c||"unknown error")+"). Ask Claude in chat to run the morning brief.");
+      });
+    },function(){fail("This view cannot start a refresh.")});
+  }
+  /* new data landed while a refresh was running: unlock and say so. The first snapshot after the page opens is only the data already there, so it never counts. */
+  var todaySeen=false;
+  function todayArrived(){
+    if(!todaySeen){todaySeen=true;return}
+    if(!refLocked())return;
+    ref.since=0; try{localStorage.removeItem("console-refresh-at")}catch(e){}
+    droid(0,5,1); paintRefresh(); refMsg("Console updated at "+hhmm()+".","good");
+  }
+  $("refresh").addEventListener("click",refreshPress); paintRefresh();
+  if(refLocked())refMsg("A refresh was started at "+hhmm(new Date(ref.since))+". The console updates by itself when the run finishes.");
   function saveRevisions(){ if(!db||!tickDate)return; var t={}; Object.keys(rev).forEach(function(k){if(rev[k].text&&!rev[k].busy)t[k]=rev[k].text}); db.doc("revisions/"+tickDate).set({texts:t}).catch(function(){}) }
   function reviseDraft(key,x){
     var rv=rev[key], base=rv.text||x.draft; rv.busy=true; rv.msg=""; var before=rv.text; rv.text=""; chime(); render();
@@ -1263,7 +1329,7 @@ table.xpt td:last-child{color:var(--amber)}
       if(!d){$("date").textContent="Sign in to load your console";return}
       db=d;
       db.doc("progress/arduino").onSnapshot(function(snap){if(ardWriting)return;var b=snap.exists?snap.data():null;state.ard=(b&&b.done)||{};render()},function(){});
-      db.doc("console/today").onSnapshot(function(snap){if(!snap.exists)return;state.today=snap.data();watchTicks(state.today.date);render()},function(){});
+      db.doc("console/today").onSnapshot(function(snap){if(!snap.exists)return;state.today=snap.data();watchTicks(state.today.date);render();todayArrived()},function(){});
       /* "wait on it", said in chat, snoozes an email's badge only -- it still shows normally in Comms */
       db.doc("meta/snoozed").onSnapshot(function(snap){var b=snap.exists?snap.data():null;state.snoozed=(b&&b.ids)||{};render()},function(){});
     });
