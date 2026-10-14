@@ -212,6 +212,18 @@ button.ti:hover{background:var(--line)}
 .draft pre{margin:0;white-space:pre-wrap;font-family:var(--body);font-size:14px;color:var(--fg);overflow-wrap:anywhere}
 .draft .check{font-size:12.5px;color:var(--amber)}
 .draft .sentok{font-size:13.5px;color:var(--green)}
+/* help desk actions: text ready to copy into the help desk */
+.msg.glpi{border-left-color:var(--amber)} .msg.glpi.update{border-left-color:var(--cy)} .msg.glpi.close{border-left-color:var(--green)}
+.msg.glpi.entered{border-left-color:var(--green);opacity:.72}
+.msg.glpi.entered>b{text-decoration:line-through;color:var(--soft)}
+.gstat{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--green)}
+.btn.done{border-color:var(--green);color:var(--green)}
+/* FYI: quieter than the reply cards, but a proper readable block, one line per inbox */
+.fyi{background:rgba(19,32,56,.55);border:1px dashed var(--line2);padding:10px 12px;display:flex;flex-direction:column;gap:7px;min-width:0;overflow-wrap:anywhere}
+.fyi p{font-size:13.5px;line-height:1.5;color:var(--soft)}
+.fyi p b{font-family:var(--mono);font-size:11.5px;font-weight:400;letter-spacing:.08em;text-transform:uppercase;color:var(--cy);margin-right:6px}
+.sub.fyih{color:var(--soft)}
+.gdesc{margin:4px 0 0;white-space:pre-wrap;font-family:var(--body);font-size:13.5px;color:var(--fg);background:var(--bg);border:1px dashed var(--line2);padding:8px 10px;overflow-wrap:anywhere}
 
 /* goals, projects, to-do */
 .goal{display:flex;flex-direction:column;gap:6px}
@@ -353,6 +365,7 @@ table.xpt td:last-child{color:var(--amber)}
       <header><span class="code">TKT</span><h2>Today's tickets</h2><span class="meta" id="ordMeta"></span></header>
       <div class="list" id="orders"><p class="empty">Tickets appear after the morning brief. Tick one when it is done.</p></div>
       <p class="note" id="ordNote"></p>
+      <div class="list" id="glpiList" hidden></div>
       <!-- example only: point this at whatever ticket system you actually use -->
       <div class="actrow"><a class="btn" id="glpi" href="https://your-ticket-system.example" target="_blank" rel="noopener">Open ticket system</a></div>
       <p class="note">Example link. If your ticket system only runs on your own network (true of a lot of self-hosted help desks), this is where you'd point it, with a note like this one explaining when the link will actually work.</p>
@@ -362,6 +375,11 @@ table.xpt td:last-child{color:var(--amber)}
       <div class="list" id="mail"><p class="empty">Emails that need a reply, with a draft ready, and anything pending.</p></div>
     </section>
   </div>
+
+  <section class="st" id="st-upc">
+    <header><span class="code">UPC</span><h2>Coming up</h2><span class="meta" id="upMeta"></span></header>
+    <div class="tl" id="upList"><p class="empty">Upcoming scheduled tasks appear with the next morning brief.</p></div>
+  </section>
 
   <div class="grid2">
     <section class="st" id="st-obj">
@@ -859,8 +877,8 @@ table.xpt td:last-child{color:var(--amber)}
   }
   function startCountdown(){
     if(reduce){engage("auto");return}
-    var left=5; $("count").textContent="Presence detected — opening in "+left+"s";
-    countTimer=setInterval(function(){left--;if(left>0)$("count").textContent="Presence detected — opening in "+left+"s"},1000);
+    var left=5; $("count").textContent="Presence detected · opening in "+left+"s";
+    countTimer=setInterval(function(){left--;if(left>0)$("count").textContent="Presence detected · opening in "+left+"s"},1000);
     autoTimer=setTimeout(function(){engage("auto")},5000);
   }
   function replay(){
@@ -897,7 +915,7 @@ table.xpt td:last-child{color:var(--amber)}
     ["Concepts made solid (right cold on two days)",n(s.conceptsSolid),25,n(s.conceptsSolid)*25]]}
   function baseXp(s){var t=-n(s.xpBaseline);xpRows(s).forEach(function(r){t+=r[3]});return Math.max(0,t)}
 
-  var state={today:null,ticks:{},ard:{},sent:{},snoozed:{}},showTrk=false,showArd=false,ardWriting=false,quizBusy=false,quizText='',rev={},sentBusy={},confirmSend={}, db=null, unsubTicks=null, tickDate=null, writing=false, canWrite=true, openDraft={};
+  var state={today:null,ticks:{},ard:{},sent:{},snoozed:{},glpi:{}}, glpiWriting=false,showTrk=false,showArd=false,ardWriting=false,quizBusy=false,quizText='',rev={},sentBusy={},confirmSend={}, db=null, unsubTicks=null, tickDate=null, writing=false, canWrite=true, openDraft={};
 
   function cells(box,total,on,cls,cur){clear(box);box.className="cells"+(cls?" "+cls:"");var N=Math.max(1,Math.min(40,total)),lit=total>40?Math.round(on/total*40):on;
     for(var i=0;i<N;i++){var c=el("i",i<lit?"on":(cur&&i===lit?"cur":""));box.appendChild(c)}}
@@ -1023,8 +1041,40 @@ table.xpt td:last-child{color:var(--amber)}
     if(rep.length){M.appendChild(el("span","sub","Needs a reply"));rep.forEach(function(x,i){M.appendChild(msg(x,"reply",i))})}
     if(tk.length){M.appendChild(el("span","sub","Pending and tracked"));tk.forEach(function(x,i){M.appendChild(msg(x,"track",i))})}
     if(!rep.length&&!tk.length)M.appendChild(el("p","empty","All channels clear."));
-    if(d.fyi){M.appendChild(el("span","sub","FYI"));M.appendChild(el("p","note",d.fyi))}
+    if(d.fyi){M.appendChild(el("span","sub fyih","FYI · for your information"));var FB=el("div","fyi"),txt=String(d.fyi);
+      /* one line per inbox: the brief writes "account: ..." runs back to back. FYI_INBOXES (near GMAIL_ACCOUNT) lists the labels to split on */
+      var re=new RegExp("(?:^|\\s)("+FYI_INBOXES.join("|")+"):\\s","g"), cuts=[], mm;
+      while((mm=re.exec(txt))){cuts.push({at:mm.index+(mm[0].charAt(0)===" "?1:0),name:mm[1],start:re.lastIndex})}
+      if(cuts.length){if(cuts[0].at>0)FB.appendChild(el("p",null,txt.slice(0,cuts[0].at).trim()));
+        cuts.forEach(function(c,i){var body=txt.slice(c.start,i+1<cuts.length?cuts[i+1].at:txt.length).trim(),p=el("p");p.appendChild(el("b",null,c.name));p.appendChild(document.createTextNode(body));FB.appendChild(p)})}
+      else FB.appendChild(el("p",null,txt));
+      M.appendChild(FB)}
     $("comMeta").textContent=rep.length+" to reply · "+tk.length+" pending";
+
+    // help desk actions to enter by hand (the page cannot reach the help desk itself)
+    var GL=$("glpiList"), gla=Array.isArray(d.glpi)?d.glpi:[]; clear(GL);
+    function copyBtn(label,txt){var b=el("button","btn",label);b.type="button";b.addEventListener("click",function(){var ok=function(){b.textContent="Copied";sfx.copy();setTimeout(function(){b.textContent=label},1500)};try{navigator.clipboard.writeText(txt).then(ok,function(){b.textContent="Select to copy"})}catch(e){b.textContent="Select to copy"}});return b}
+    var glOpen=gla.filter(function(g){return !state.glpi[glpiKey(g)]}), glDone=gla.length-glOpen.length;
+    if(gla.length){GL.appendChild(el("span","sub","Help desk actions to enter"+(glDone?" · "+glDone+" entered":"")));
+      /* open ones first, entered ones sink to the bottom, collapsed */
+      glOpen.concat(gla.filter(function(g){return state.glpi[glpiKey(g)]})).forEach(function(g){
+        var k=glpiKey(g), ent=state.glpi[k], m=el("div","msg glpi "+String(g.action||"").toLowerCase()+(ent?" entered":""));
+        m.appendChild(el("b",null,(g.action?g.action+": ":"")+(g.title||"")));
+        if(ent){m.appendChild(el("span","gstat","Entered"+(ent.at?" · "+ent.at:"")))}
+        else{if(g.why)m.appendChild(el("span","m",g.why));if(g.description)m.appendChild(el("pre","gdesc",g.description))}
+        var a=el("div","acts");
+        if(!ent){a.appendChild(copyBtn("Copy title",g.title||""));if(g.description)a.appendChild(copyBtn("Copy description",g.description))}
+        var db2=el("button","btn"+(ent?"":" done"),ent?"Undo":"Done, entered");db2.type="button";db2.setAttribute("aria-pressed",ent?"true":"false");
+        if(!db||glpiWriting)db2.disabled=true;
+        db2.addEventListener("click",function(){toggleGlpi(g)});a.appendChild(db2);
+        m.appendChild(a);GL.appendChild(m)})}
+    GL.hidden=!gla.length;
+
+    // upcoming scheduled tasks
+    var UP=$("upList"), upc=d.upcoming; clear(UP);
+    (Array.isArray(upc)?upc:[]).forEach(function(u){var r=el("div","ti");r.appendChild(el("span","nn",u.when||""));r.appendChild(el("span","tt",u.name||""));r.appendChild(el("span","ss","SCHEDULED"));UP.appendChild(r)});
+    if(!UP.firstChild)UP.appendChild(el("p","empty",Array.isArray(upc)?"Nothing scheduled in the next 30 days.":"Upcoming scheduled tasks appear with the next morning brief."));
+    $("upMeta").textContent=Array.isArray(upc)&&upc.length?upc.length+" coming":"";
 
     // next step per project, easiest first
     var NX=$("nx"), rank={easy:0,medium:1,hard:2}; clear(NX);
@@ -1070,6 +1120,7 @@ table.xpt td:last-child{color:var(--amber)}
     function lt(label,cls,target,focus){var e=el("button","lt "+cls);e.type="button";e.appendChild(el("i"));e.appendChild(document.createTextNode(label));e.addEventListener("click",function(){scan(note(0));goTo(target,focus)});LT.appendChild(e)}
     lt("Comms "+(nr?nr+" waiting":"clear"),nr?"r":"g","comms",null);
     lt("Tickets "+(quests.length-dc)+" open",quests.length-dc?"a":"g","st-tkt",null);
+    if(gla.length)lt(glOpen.length?"Desk "+glOpen.length+" to enter":"Desk all entered",glOpen.length?"a":"g","st-tkt","glpiList");
     var ag=Array.isArray(d.agenda)?d.agenda:[], tm=Array.isArray(d.tomorrow)?d.tomorrow:[];
     lt(ag.length?"Agenda "+ag.length+" today, next "+(ag[0].time||""):"Agenda clear today",ag.length?"a":"g",null,null);
     if(tm.length)lt("Tomorrow "+(tm[0].time||"")+" "+(tm[0].short||tm[0].title||""),"c",null,null);
@@ -1114,16 +1165,23 @@ table.xpt td:last-child{color:var(--amber)}
 
     // priority badges -- one per thing that needs doing today: the hand-set priority, each agenda item, each email needing a reply (unless snoozed in chat), each open ticket, each starred to-do
     var BG=$("badges"); clear(BG);
+    /* one badge per thing: each badge's names (capitalised words, e.g. a customer or a place) are remembered, and a later badge naming the same thing is skipped */
+    var STOP={attend:1,decide:1,reply:1,send:1,close:1,create:1,open:1,update:1,call:1,check:1,finish:1,prepare:1,rebuild:1,book:1,review:1,write:1,rebrand:1,start:1,build:1,glpi:1,gmail:1,claude:1,today:1,tomorrow:1,monday:1,tuesday:1,wednesday:1,thursday:1,friday:1,saturday:1,sunday:1,super:1};
+    function names(t){var w=String(t||"").match(/[A-ZÀ-Ý][A-Za-zÀ-ÿ]{3,}/g)||[];return w.map(function(x){return x.toLowerCase()}).filter(function(x){return !STOP[x]})}
+    var seen={};
+    function dup(t){var k=names(t);return k.some(function(x){return seen[x]})}
+    function mark(t){names(t).forEach(function(x){seen[x]=1})}
     function badge(cls,label,sub,sectionId,focusId,extra){
+      if(dup(label))return; mark(label);
       var b=el("button","badge"+(cls?" "+cls:"")); b.type="button"; b.appendChild(el("i"));
-      var t=el("span"); t.appendChild(el("b",null,label)); if(sub)t.appendChild(document.createTextNode(" — "+sub)); b.appendChild(t);
+      var t=el("span"); t.appendChild(el("b",null,label)); if(sub)t.appendChild(document.createTextNode(" · "+sub)); b.appendChild(t);
       b.addEventListener("click",function(){if(extra)extra();sfx.beam();goTo(sectionId,focusId)});
       BG.appendChild(b);
     }
     if(p&&p.title){var pTarget=p.draftFor?"comms":null, pFocus=p.draftFor?"msg-"+p.draftFor:null;
       badge("",p.title,p.why,pTarget,pFocus,p.draftFor?function(){openDraft[p.draftFor]=true}:null)}
     ag.forEach(function(a){badge("",a.title||"Agenda item",a.time||"",null,null)});
-    rep.forEach(function(x,i){var key=x.id||("reply"+i); if(!state.sent[key]&&!state.snoozed[key])badge("r",x.title||"Reply needed",x.from||"","comms","msg-"+key)});
+    rep.forEach(function(x,i){var key=x.id||("reply"+i); if(!state.sent[key]&&!state.snoozed[key]&&!(p&&p.draftFor===key))badge("r",x.title||"Reply needed",x.from||"","comms","msg-"+key)});
     quests.filter(function(q){return !state.ticks[q.id]}).forEach(function(q){badge("c",q.title||"Ticket","","st-tkt","ord-"+q.id)});
     (Array.isArray(td.starred)?td.starred:[]).forEach(function(t2){badge("g",t2,"starred to-do","st-tdo",null)});
 
@@ -1244,6 +1302,7 @@ table.xpt td:last-child{color:var(--amber)}
      The console's draft text is only a copy. These find the matching draft in Gmail (same thread), rewrite it when the text is revised here, and send it.
      Every send is two presses, and a failed send is never retried automatically. */
   /* Example: put the address of the mailbox your own Gmail connector is signed in to. Drafts for any other account get no send button. */
+  var FYI_INBOXES=["work","personal"]; /* labels the FYI text uses, as "work: ..." */
   var GMAIL="Gmail", GMAIL_ACCOUNT="you@example.com", gd={}, snd={};
   function esc(t){return String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")}
   function norm(t){return String(t||"").replace(/\s+/g," ").trim()}
@@ -1311,6 +1370,18 @@ table.xpt td:last-child{color:var(--amber)}
       sfx.alert(); render();
     });
   }
+  /* Help desk "Done": one lasting record (glpi/entered) of every action you have typed into your help desk, keyed by its exact text, so it stays marked across days and the morning brief reads it and never lists it again */
+  function glpiKey(g){var s=[g.action||"",g.title||"",g.description||""].join("|"),h=5381;for(var i=0;i<s.length;i++)h=((h<<5)+h+s.charCodeAt(i))>>>0;return "g"+h.toString(16)}
+  function toggleGlpi(g){
+    if(!db||glpiWriting)return; var k=glpiKey(g), next={};
+    Object.keys(state.glpi).forEach(function(x){if(state.glpi[x])next[x]=state.glpi[x]});
+    var was=!!next[k];
+    if(was)delete next[k];
+    else{var t=new Date(),dd=state.today&&state.today.date||"";next[k]={action:String(g.action||""),title:String(g.title||""),date:dd,at:("0"+t.getDate()).slice(-2)+"/"+("0"+(t.getMonth()+1)).slice(-2)+" "+hhmm(t)}}
+    (was?sfx.undo:sfx.done)();
+    glpiWriting=true; var prev=state.glpi; state.glpi=next; render();
+    db.doc("glpi/entered").set({items:next}).catch(function(){state.glpi=prev;sfx.alert();render()}).then(function(){glpiWriting=false;render()});
+  }
   function toggleArd(k){
     if(!db||ardWriting)return; var next={};Object.keys(state.ard).forEach(function(x){if(state.ard[x])next[x]=true});
     var was=!!next[k]; if(was)delete next[k]; else next[k]=true; servo(!was);
@@ -1331,10 +1402,12 @@ table.xpt td:last-child{color:var(--amber)}
       db.doc("progress/arduino").onSnapshot(function(snap){if(ardWriting)return;var b=snap.exists?snap.data():null;state.ard=(b&&b.done)||{};render()},function(){});
       db.doc("console/today").onSnapshot(function(snap){if(!snap.exists)return;state.today=snap.data();watchTicks(state.today.date);render();todayArrived()},function(){});
       /* "wait on it", said in chat, snoozes an email's badge only -- it still shows normally in Comms */
+      db.doc("glpi/entered").onSnapshot(function(snap){if(glpiWriting)return;var b=snap.exists?snap.data():null;state.glpi=(b&&b.items)||{};render()},function(){});
       db.doc("meta/snoozed").onSnapshot(function(snap){var b=snap.exists?snap.data():null;state.snoozed=(b&&b.ids)||{};render()},function(){});
     });
   }
 })();
 </script>
+
 
 </body></html>

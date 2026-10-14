@@ -21,7 +21,7 @@ The whole page reads from a single JavaScript object, `state.today`, and one fun
 
 **If you don't code:** open `index.html` in a Claude conversation (claude.ai, the desktop app, or Claude Code) and describe what you want tracked, tickets, a to-do list, a habit tracker, whatever. Claude can read the `render()` function, see the shape it expects, and wire it up for you the same way this was built in the first place.
 
-**If you do code:** `render()` lives around line 824 and is the entire data contract. It's plain, readable JavaScript, no framework, no build step. Here's a minimal working `state.today` to start from:
+**If you do code:** `render()` lives around line 950 and is the entire data contract. It's plain, readable JavaScript, no framework, no build step. Here's a minimal working `state.today` to start from:
 
 ```js
 state.today = {
@@ -48,6 +48,10 @@ state.today = {
   tracker: [{ n: 1, title: "Example skill", done: false }],
   arduino: { items: [{ n: 1, title: "Example kit project" }] },
   fyi: "",
+  glpi: [
+    { action: "Update", title: "Example ticket", why: "Customer replied", description: "Text to paste into the help desk" }
+  ],
+  upcoming: [{ when: "Fri 18:00", name: "Example scheduled task" }],
   stats: { trackerDone: 0, trackerTotal: 25, todoOpen: 1, todoDone: 0, todoStarred: 1 }
 };
 render();
@@ -61,6 +65,12 @@ A few features (`window.claude.use("db")`, `.use("mcp")`, `.use("sample")`) only
 
 The draft cards can also work on the real Gmail draft behind them: revising a draft rewrites the matching Gmail draft (found by its thread), and a two-press Send button sends it. That needs the page published with the Gmail connector's `list_drafts`, `update_draft` and `send_message` tools, and `GMAIL_ACCOUNT` set to your own address.
 
+The tickets panel can also list help desk actions (`glpi` in the data): a title and description ready to copy into a help desk the page cannot reach itself, such as a self-hosted one on your home network. Each card has copy buttons and a "Done, entered" button, and what you mark as entered is kept (in the page's `glpi/entered` record), so whatever fills the console can read it and stop listing those actions again.
+
+The "Coming up" section lists upcoming scheduled tasks (`upcoming` in the data). The FYI note splits into one line per inbox when the text uses labels like `work: ...`; set those labels in `FYI_INBOXES`.
+
+The priority badges skip repeats: a badge that names the same customer or thing as an earlier one is not shown twice, and a reply that already has the top priority badge does not get a second one.
+
 Once you scroll down the page, the pinned bar shrinks to its header row, so the status lights and number tiles stay at the top instead of following you.
 
 The Refresh button in the header starts a fresh run of whatever scheduled task fills the console, then waits: the page is already listening to its data, so the new numbers appear by themselves when the run finishes. It is two presses, because a full run takes a while and costs usage, and it locks for 30 minutes after a start so one run cannot be started twice.
@@ -73,6 +83,9 @@ The page only draws what it is given. In the original setup a scheduled morning 
 
 - **Follow up on quiet quotes.** For a customer quote or job that is waiting on the customer, keep the date of your last message to them. Count business days only, Monday to Friday. Once 4 business days pass with no reply, flag it as needing a follow-up instead of leaving it as "waiting on customer".
 - **Show a routine bill once.** A recurring bill appears as a new item the first time, then drops off the list. It only comes back if it is due within 3 days and still not confirmed as paid, or if a different bill arrives.
+- **Stop chasing after two follow-ups.** Counting from your first reply or quote, send at most two follow-ups (three emails in total) inside 8 business days. If there is still no answer after the second follow-up, close the ticket and stop listing it. If the customer comes back later, open a new ticket instead of reopening the old one.
+- **Don't repeat entered help desk actions.** Before listing a help desk action, check what you already marked as entered, and only list actions for things that happened after that.
+- **Say everything once.** The same item is never repeated across badges and sections.
 - **Cross-check the next step.** Before picking the "next" step for a project, read the most recently updated notes on that topic, not only the project's own summary. A summary can go stale while the real work has moved on.
 
 ## Sound
